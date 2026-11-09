@@ -1,0 +1,4 @@
+Datasheet/
+*.pdf
+.DS_Store
+Thumbs.db

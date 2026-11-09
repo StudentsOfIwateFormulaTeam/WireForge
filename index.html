@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ハーネス配線図エディタ</title>
+  <meta name="description" content="学生フォーミュラEV向け 車両ハーネス配線図作成ツール（ブラウザ完結・サーバー不要）">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header id="toolbar" class="toolbar"></header>
+
+  <aside id="parts" class="panel panel-left" aria-label="部品パネル"></aside>
+
+  <main class="canvas-wrap">
+    <div id="canvas" class="canvas"></div>
+    <button class="panel-toggle left" data-toggle-panel="left" title="部品パネルの表示切替">◧</button>
+    <button class="panel-toggle right" data-toggle-panel="right" title="プロパティパネルの表示切替">◨</button>
+  </main>
+
+  <aside id="props" class="panel panel-right" aria-label="プロパティパネル"></aside>
+
+  <footer id="pagebar" class="pagebar"></footer>
+
+  <noscript>このアプリを使うには JavaScript を有効にしてください。</noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
