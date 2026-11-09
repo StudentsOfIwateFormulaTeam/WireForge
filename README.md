@@ -2,6 +2,8 @@
 
 学生フォーミュラEV向けの車両ハーネス配線図をブラウザで作成するツールです。サーバー不要で、GitHub Pages にそのまま置いて使えます。
 
+**公開版: https://studentsofiwateformulateam.github.io/WireForge/**
+
 ## 使い方（ローカル）
 ES Modules を使っているため、`index.html` をダブルクリックではなく簡易サーバー経由で開いてください。
 
@@ -70,4 +72,4 @@ docs/datasheet-notes.md    断面図・ピン配置の根拠
 - [x] Phase 3: コルゲートチューブ
 - [x] Phase 4: ページ管理・保存・PDF 出力
 - [x] Phase 5: 動作確認・改善（図面チェック、読み込み時の修復、ラベル自動配置、操作方法一覧、テスト）
-- [ ] GitHub Pages への公開（リポジトリ作成後）
+- [x] GitHub Pages への公開
