@@ -2,6 +2,7 @@
 import { uid, nextConnectorLabel, createWire, createTube, nextTubeLabel, createProject, createPage, clonePage, nextPageName, createText } from '../core/model.js';
 import { downloadProject, pickProjectFile, readProjectFile } from '../core/io.js';
 import { pruneTubes, MIN_SPAN } from '../core/tubes.js';
+import { bestWireLabelT, bestTubeLabelOffset, labelObstacles, layoutPageLabels } from './labelLayout.js';
 
 const activePage = (p) => p.pages.find((pg) => pg.id === p.activePageId);
 const SPEC_KEYS = ['type', 'gauge', 'color', 'lengthUnit'];
@@ -74,12 +75,10 @@ export function createCommands(store) {
     addWire(from, to, props = {}) {
       if (from.connectorId === to.connectorId && from.pinId === to.pinId) return null;
       const w = createWire(from, to, { ...(store.ui.lastWire || {}), ...props });
-      // 同じコネクタ同士を結ぶ配線のラベルが重ならないよう、既定のラベル位置をずらす（0.5, 0.35, 0.65, 0.2, 0.8, …）
+      // ラベルがコネクタや他のラベルと重ならない位置を選ぶ
       if (w.labelT == null) {
-        const pair = (x) => [x.from.connectorId, x.to.connectorId].sort().join('|');
-        const k = store.page.wires.filter((x) => pair(x) === pair(w)).length;
-        const STEPS = [0.5, 0.35, 0.65, 0.2, 0.8, 0.27, 0.73, 0.42, 0.58];
-        w.labelT = STEPS[k % STEPS.length];
+        const display = store.project.settings?.display;
+        w.labelT = bestWireLabelT(store.page, w, display, labelObstacles(store.page, display));
       }
       store.commit((p) => activePage(p).wires.push(w));
       store.select({ kind: 'wire', id: w.id });
@@ -107,6 +106,8 @@ export function createCommands(store) {
       if (!store.page.wires.some((w) => w.id === wireId)) return null;
       const t = createTube(wireId, t0, t1, { ...(store.ui.lastTube || {}), ...props, label: nextTubeLabel(store.project) });
       if (t.t1 - t.t0 < MIN_SPAN) t.t1 = Math.min(1, t.t0 + MIN_SPAN);
+      const display = store.project.settings?.display;
+      Object.assign(t, bestTubeLabelOffset(store.page, t, labelObstacles(store.page, display)));
       store.commit((p) => activePage(p).tubes.push(t));
       store.select({ kind: 'tube', id: t.id });
       return t.id;
@@ -275,6 +276,10 @@ export function createCommands(store) {
       if (from < 0 || from === index) return;
       store.commit((p) => { const [pg] = p.pages.splice(from, 1); p.pages.splice(index, 0, pg); });
     },
+    /** 現在のページの配線ラベル・チューブラベルを、重ならない位置へ並べ直す */
+    autoLayoutLabels() {
+      store.commit((p) => layoutPageLabels(activePage(p), p.settings?.display));
+    },
     setPaper(paper) {
       store.commit((p) => { activePage(p).paper = paper; });
     },
@@ -289,11 +294,16 @@ export function createCommands(store) {
     },
     async openFile(file) {
       try {
-        const project = file ? await readProjectFile(file) : await pickProjectFile();
-        if (!project) return;
+        const result = file ? await readProjectFile(file) : await pickProjectFile();
+        if (!result) return;
+        const { project, repairs } = result;
         const hasWork = store.project.pages.some((p) => p.connectors.length || p.wires.length || p.texts.length);
         if (!file && hasWork && !confirm(`「${project.name}」を開きます。現在の図面は閉じられます（保存していない変更は失われます）。よろしいですか？`)) return;
         store.replace(project);
+        if (repairs.length) {
+          const list = [...new Set(repairs)];
+          alert(`ファイルに不整合があったため、次の修復をして読み込みました（元のファイルは変更していません）。\n\n・${list.slice(0, 12).join('\n・')}${list.length > 12 ? `\n…ほか ${list.length - 12} 件` : ''}`);
+        }
       } catch (e) {
         alert(`読み込みに失敗しました。\n${e.message}`);
       }
@@ -337,6 +347,7 @@ export function bindKeyboard(store, cmd, canvas) {
       if (k === 't') return cmd.toggleTubeTool(), true;
       if (k === 'g') return cmd.toggleGrid(), true;
       if (k === 'f') return canvas.fit(), true;
+      if (ev.key === '?') return cmd.showHelp?.(), true;
       if (k === 'escape') {
         if (store.ui.wireStart) store.setUi({ wireStart: null });
         else if (store.ui.tool !== 'select') cmd.setTool('select');

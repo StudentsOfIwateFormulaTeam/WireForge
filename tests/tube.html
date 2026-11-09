@@ -1,0 +1,159 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>test: tube</title><link rel="stylesheet" href="../css/app.css"></head><body>
+<header id="toolbar" class="toolbar"></header><aside id="parts" class="panel panel-left"></aside>
+<main class="canvas-wrap"><div id="canvas" class="canvas"></div></main><aside id="props" class="panel panel-right"></aside><footer id="pagebar" class="pagebar"></footer>
+<pre id="out" style="position:fixed;left:0;bottom:40px;background:#fff;z-index:9;font-size:11px;margin:0"></pre>
+<script type="module">
+// テストは localStorage（自動保存）を消すので、公開サイトでは実行しない
+if (!['localhost', '127.0.0.1'].includes(location.hostname)) { document.body.textContent = 'テストはローカル環境（localhost）でのみ実行できます。'; throw new Error('local only'); }
+if (!new URLSearchParams(location.search).get('restore')) localStorage.clear();
+const log=[]; const ok=(n,c)=>log.push((c?'PASS ':'FAIL ')+n);
+window.addEventListener('error',e=>log.push('ERROR '+e.message));
+const q=new URLSearchParams(location.search);
+try{
+await import('../js/main.js');
+const {canvas, store, cmd} = window.__app;
+window.confirm=()=>true;
+canvas.fit();
+canvas.placePart('HRS-ZE064W-8DS', 80, 75);
+canvas.placePart('HRS-ZE064W-14DS', 220, 75);
+canvas.placePart('HRS-BH12WP-3SC', 80, 155);
+canvas.placePart('HRS-HVH-280-2/2S', 220, 155);
+const [J1,J2,J3,J4]=store.page.connectors;
+const pinEl=(cid,pid)=>document.querySelector(`#canvas [data-kind=pin][data-id="${cid}"][data-pin="${pid}"]`);
+const click=(el)=>{const r=el.getBoundingClientRect(); const o={bubbles:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2,button:0,pointerId:1};
+  el.dispatchEvent(new PointerEvent('pointerdown',o)); el.dispatchEvent(new PointerEvent('pointerup',o));};
+// wire mode via key W
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'w'}));
+ok('wire tool on', store.ui.tool==='wire');
+click(pinEl(J1.id,'3')); ok('start set', store.ui.wireStart?.pinId==='3');
+click(pinEl(J2.id,'1')); ok('wire1 created', store.page.wires.length===1);
+const w1=store.page.wires[0];
+ok('wire ends', w1.from.connectorId===J1.id && w1.from.pinId==='3' && w1.to.connectorId===J2.id && w1.to.pinId==='1');
+cmd.updateWire(w1.id,{name:'CAN_H', color:'Y', gauge:0.85, length:1200});
+click(pinEl(J1.id,'4')); click(pinEl(J2.id,'2'));
+const w2=store.page.wires[1];
+ok('wire2 inherits spec', w2 && w2.color==='Y' && w2.gauge===0.85 && w2.length==null);
+cmd.updateWire(w2.id,{name:'CAN_L', color:'G', length:1.2*1000, lengthUnit:'m'});
+// branch: J2-1 also to J4-1 (shared pin -> net)
+click(pinEl(J2.id,'1')); click(pinEl(J4.id,'1'));
+const w3=store.page.wires[2];
+cmd.updateWire(w3.id,{name:'+12V', color:'R', gauge:2, type:'UL1015', length:450});
+click(pinEl(J3.id,'A')); click(pinEl(J4.id,'2'));
+const w4=store.page.wires[3]; cmd.updateWire(w4.id,{name:'GND', color:'B', gauge:3, length:800});
+click(pinEl(J3.id,'1')); click(pinEl(J1.id,'8'));
+const w5=store.page.wires[4]; cmd.updateWire(w5.id,{name:'SIG', color:'W', gauge:0.3, length:600});
+ok('5 wires', store.page.wires.length===5);
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));
+ok('tool off', store.ui.tool==='select');
+// pin colors
+ok('pin colored', getComputedStyle(pinEl(J1.id,'3')).fill==='rgb(242, 197, 0)');
+// select wire by clicking line
+const hit=document.querySelector(`#canvas .wire[data-id="${w1.id}"] .wire-hit`);
+store.select({kind:'wire',id:w1.id});
+ok('net highlight', document.querySelector(`#canvas .wire[data-id="${w3.id}"]`).classList.contains('wire-net'));
+ok('panel color chips', document.querySelectorAll('#props .color-chip').length===10);
+ok('panel net list', document.querySelectorAll('#props .wire-table tbody tr').length===1);
+// add waypoint via handle drag
+const h=document.querySelector('#canvas .handle-add'); const r=h.getBoundingClientRect();
+const o=(x,y)=>({bubbles:true,clientX:x,clientY:y,button:0,pointerId:1});
+h.dispatchEvent(new PointerEvent('pointerdown',o(r.x+r.width/2,r.y+r.height/2)));
+canvas.svg.dispatchEvent(new PointerEvent('pointermove',o(r.x+r.width/2,r.y+r.height/2-30*canvas.zoom/3)));
+canvas.svg.dispatchEvent(new PointerEvent('pointerup',o(0,0)));
+ok('waypoint added', store.page.wires[0].waypoints.length===1);
+cmd.undo(); ok('waypoint undo', store.page.wires[0].waypoints.length===0); cmd.redo();
+// change endpoint via panel equivalent
+cmd.updateWire(w2.id,{to:{connectorId:J2.id,pinId:'5'}}); ok('endpoint change', store.page.wires[1].to.pinId==='5');
+// labelT spread
+cmd.updateWire(w1.id,{labelT:0.3}); cmd.updateWire(w2.id,{labelT:0.62});
+// delete connector cascade
+store.select({kind:'connector',id:J4.id}); cmd.deleteSelection();
+ok('cascade delete', store.page.wires.length===3 && store.page.connectors.length===3);
+cmd.undo(); ok('cascade undo', store.page.wires.length===5);
+// delete wire by key
+store.select({kind:'wire',id:w5.id}); window.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete'}));
+ok('wire delete', store.page.wires.length===4); cmd.undo();
+
+// ===== Phase 3: tubes =====
+const o2=(x,y)=>({bubbles:true,clientX:x,clientY:y,button:0,pointerId:1});
+const toClient=(x,y)=>{const r=canvas.svg.getBoundingClientRect(); const m=canvas.svg.querySelector('.viewport').transform.baseVal.consolidate().matrix; return [r.left+m.e+x*m.a, r.top+m.f+y*m.d];};
+const {wirePoints,pointAt}=await import('../js/core/wires.js');
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'t'}));
+ok('tube tool on', store.ui.tool==='tube');
+// drag along w4 (GND) from 20% to 70%
+let pts=wirePoints(store.page, store.page.wires.find(w=>w.id===w4.id));
+let a=pointAt(pts,0.4), b=pointAt(pts,0.7);
+let [ax,ay]=toClient(a.x,a.y), [bx,by]=toClient(b.x,b.y);
+let tgt=document.elementFromPoint(ax,ay);
+ok('hit wire at start ('+tgt?.getAttribute('class')+')', !!tgt?.closest('[data-kind=wire],[data-kind=wire-label]'));
+tgt.dispatchEvent(new PointerEvent('pointerdown',o2(ax,ay)));
+canvas.svg.dispatchEvent(new PointerEvent('pointermove',o2(bx,by)));
+canvas.svg.dispatchEvent(new PointerEvent('pointerup',o2(bx,by)));
+const T1=store.page.tubes[0];
+ok('tube created by drag', store.page.tubes.length===1 && Math.abs(T1.t0-0.4)<0.02 && Math.abs(T1.t1-0.7)<0.02);
+ok('tube selected & tool off', store.ui.selection?.kind==='tube' && store.ui.tool==='select');
+ok('tube label T1', T1.label==='T1');
+ok('one history entry', (cmd.undo(), store.page.tubes.length===0)); cmd.redo();
+// click-only tube on w1
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'t'}));
+pts=wirePoints(store.page, store.page.wires.find(w=>w.id===w1.id));
+a=pointAt(pts,0.5); [ax,ay]=toClient(a.x,a.y);
+document.elementFromPoint(ax,ay).dispatchEvent(new PointerEvent('pointerdown',o2(ax,ay)));
+canvas.svg.dispatchEvent(new PointerEvent('pointerup',o2(ax,ay)));
+const T2=store.page.tubes[1];
+ok('click tube default span', T2 && T2.t1-T2.t0>0.05 && T2.t0<0.5 && T2.t1>0.5);
+// spec edit
+cmd.updateTube(T2.id,{size:7.4,color:'orange',length:300});
+ok('tube spec', store.page.tubes[1].size===7.4 && store.page.tubes[1].color==='orange');
+cmd.setTubeWire(T2.id, w2.id, true);
+ok('multiple targets', store.page.tubes[1].wireIds.length===2);
+cmd.setTubeWire(T2.id, w1.id, false);
+ok('guide not removable', store.page.tubes[1].wireIds.includes(w1.id));
+// panel
+store.select({kind:'tube',id:T2.id});
+ok('panel tube section', document.querySelector('#props h3').textContent.includes('T2') && document.querySelectorAll('#props .check-list input').length===5);
+ok('target wires highlighted', document.querySelector(`#canvas .wire[data-id="${w2.id}"]`).classList.contains('wire-net'));
+ok('end handles', document.querySelectorAll('#canvas .handle-tube').length===2);
+// drag end handle t1 to 90%
+const h1=document.querySelector('#canvas .handle-tube[data-end=t1]'); const hr=h1.getBoundingClientRect();
+b=pointAt(pts,0.9); [bx,by]=toClient(b.x,b.y);
+h1.dispatchEvent(new PointerEvent('pointerdown',o2(hr.x+hr.width/2,hr.y+hr.height/2)));
+canvas.svg.dispatchEvent(new PointerEvent('pointermove',o2(bx,by)));
+canvas.svg.dispatchEvent(new PointerEvent('pointerup',o2(bx,by)));
+ok('end handle resize', Math.abs(store.page.tubes[1].t1-0.9)<0.02);
+// move tube body by 10%
+const before=[store.page.tubes[1].t0,store.page.tubes[1].t1];
+const mid=pointAt(pts,(before[0]+before[1])/2), mv=pointAt(pts,(before[0]+before[1])/2-0.1);
+[ax,ay]=toClient(mid.x,mid.y); [bx,by]=toClient(mv.x,mv.y);
+const tb=document.elementFromPoint(ax,ay);
+ok('hit tube body', tb?.closest('[data-kind=tube]')?.getAttribute('data-id')===T2.id);
+tb.dispatchEvent(new PointerEvent('pointerdown',o2(ax,ay)));
+canvas.svg.dispatchEvent(new PointerEvent('pointermove',o2(bx,by)));
+canvas.svg.dispatchEvent(new PointerEvent('pointerup',o2(bx,by)));
+const after=[store.page.tubes[1].t0,store.page.tubes[1].t1];
+ok('tube slide keeps span', Math.abs((after[1]-after[0])-(before[1]-before[0]))<0.005 && Math.abs(after[0]-(before[0]-0.1))<0.02);
+// tube follows waypoints: geometry exists
+ok('tube rendered with ribs', document.querySelectorAll('#canvas .tube .tube-rib').length===2);
+// delete guide wire -> tube reassigned to w2
+cmd.deleteWire(w1.id);
+ok('guide wire deleted -> reassigned', store.page.tubes.find(t=>t.id===T2.id)?.wireId===w2.id);
+cmd.undo();
+// delete connector J4 removes w4 -> T1 removed
+window.confirm=()=>true; cmd.deleteConnector(J4.id);
+ok('tube pruned with wire', !store.page.tubes.some(t=>t.id===T1.id)); cmd.undo();
+// delete by key
+store.select({kind:'tube',id:T1.id}); window.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete'}));
+ok('tube delete key', store.page.tubes.length===1); cmd.undo();
+// migrate roundtrip
+const {migrate}=await import('../js/core/model.js');
+const m=migrate(JSON.parse(JSON.stringify(store.project)));
+ok('migrate keeps tubes', m.pages[0].tubes.length===2);
+// print render
+const {renderSheet}=await import('../js/render/sheetRenderer.js');
+const g=renderSheet(store.page,{forPrint:true,display:store.project.settings.display});
+ok('print has tubes', g.querySelectorAll('.tube').length===2 && g.querySelectorAll('.tube-label').length===2);
+store.select(q.get('sel')==='wire'?{kind:'wire',id:w1.id}:q.get('sel')==='tube'?{kind:'tube',id:store.page.tubes[1].id}:null);
+if(q.get('zoom')){const {tubeGeometry}=await import('../js/core/tubes.js'); const tt=store.page.tubes[+q.get('zoom')-1]; const gm=tubeGeometry(store.page,tt); const [cx,cy]=toClient(gm.mid.x,gm.mid.y); canvas.zoomAt(5,cx,cy);}
+}catch(e){log.push('EXC '+e.stack)}
+document.getElementById('out').textContent=log.join('\n');
+if(q.get('shot')) document.getElementById('out').remove();
+</script></body></html>

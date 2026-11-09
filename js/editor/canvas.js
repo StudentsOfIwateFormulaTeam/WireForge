@@ -450,5 +450,23 @@ export function createCanvas(container, store, cmd, { onCursor } = {}) {
     return toSheet(r.left + r.width / 2, r.top + r.height / 2);
   }
 
-  return { svg, fit, zoomAt, placePart, render, viewCenter, get zoom() { return view.zoom; } };
+  /** 選択中の部品が画面外なら、画面中央へスクロールする（図面チェックの「該当箇所へ移動」用） */
+  function reveal(sel = store.ui.selection) {
+    if (!sel) return;
+    const id = sel.kind === 'pin' ? sel.connectorId : sel.id;
+    const kind = sel.kind === 'pin' ? 'connector' : sel.kind;
+    const node = kind === 'titleBlock'
+      ? sheetHolder.querySelector('[data-kind="titleBlock"]')
+      : sheetHolder.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"]`);
+    if (!node) return;
+    const r = node.getBoundingClientRect(), box = svg.getBoundingClientRect();
+    const m = 40;
+    const visible = r.left >= box.left + m && r.right <= box.right - m && r.top >= box.top + m && r.bottom <= box.bottom - m;
+    if (visible) return;
+    view.tx += box.left + box.width / 2 - (r.left + r.width / 2);
+    view.ty += box.top + box.height / 2 - (r.top + r.height / 2);
+    applyView();
+  }
+
+  return { svg, fit, zoomAt, placePart, render, viewCenter, reveal, get zoom() { return view.zoom; } };
 }

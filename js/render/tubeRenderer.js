@@ -29,6 +29,21 @@ export function tubeLabelLines(page, tube) {
   return lines;
 }
 
+/** ラベルの寸法 { w, h, lh } */
+export function tubeLabelSize(page, tube) {
+  const lines = tubeLabelLines(page, tube);
+  const lh = LABEL_FONT * 1.35;
+  return { lines, lh, w: Math.max(...lines.map((l) => textWidth(l.text, LABEL_FONT))) + 2.6, h: lines.length * lh + 0.8 };
+}
+
+/** ラベルの外形（図面座標）。描けないチューブは null */
+export function tubeLabelBox(page, tube) {
+  const geo = tubeGeometry(page, tube);
+  if (!geo) return null;
+  const { w, h } = tubeLabelSize(page, tube);
+  return { x: geo.label.x - w / 2, y: geo.label.y - h / 2, w, h };
+}
+
 /**
  * @param opts { display, selected, forPrint }
  * @returns { body, label } 帯は配線の上・コネクタの下、ラベルは最前面のレイヤに置く
@@ -60,10 +75,7 @@ export function renderTube(page, tube, opts = {}) {
 
   // ラベル（引き出し線付き）
   if (opts.display?.tubeLabel === false) return { body: g, label: null };
-  const lines = tubeLabelLines(page, tube);
-  const lh = LABEL_FONT * 1.35;
-  const w = Math.max(...lines.map((l) => textWidth(l.text, LABEL_FONT))) + 2.6;
-  const h = lines.length * lh + 0.8;
+  const { lines, lh, w, h } = tubeLabelSize(page, tube);
   const { x, y } = geo.label;
   const lg = s('g', { class: 'tube-label' + (opts.selected ? ' tl-selected' : ''), 'data-kind': 'tube-label', 'data-id': tube.id });
   // 引き出し線は帯と同じレイヤ（配線ラベルより下）に置き、ラベル同士の重なりを避ける

@@ -31,6 +31,21 @@ export function wireLabelLines(page, wire, display) {
   return lines;
 }
 
+/** ラベルの寸法 { w, h, lh }（lines が空なら null） */
+export function wireLabelSize(lines) {
+  if (!lines.length) return null;
+  const lh = LABEL_FONT * 1.35;
+  return { w: Math.max(...lines.map((l) => textWidth(l.text, LABEL_FONT))) + 2.2, h: lines.length * lh + 0.8, lh };
+}
+
+/** 位置 t に置いたときのラベルの外形（図面座標）。描けない配線・ラベル無しは null */
+export function wireLabelBox(page, wire, display, t = wire.labelT ?? 0.5, pts = wirePoints(page, wire)) {
+  const size = pts && wireLabelSize(wireLabelLines(page, wire, display || {}));
+  if (!size) return null;
+  const at = pointAt(pts, t);
+  return { x: at.x - size.w / 2, y: at.y - size.h / 2, w: size.w, h: size.h };
+}
+
 /**
  * @param opts { display, state: 'selected'|'net'|null, forPrint }
  * @returns { line, label } 線はコネクタの下、ラベルはコネクタの上のレイヤに置く
@@ -52,9 +67,7 @@ export function renderWire(page, wire, opts = {}) {
   const lines = wireLabelLines(page, wire, opts.display || {});
   if (lines.length) {
     const at = pointAt(pts, wire.labelT ?? 0.5);
-    const lh = LABEL_FONT * 1.35;
-    const w = Math.max(...lines.map((l) => textWidth(l.text, LABEL_FONT))) + 2.2;
-    const h = lines.length * lh + 0.8;
+    const { w, h, lh } = wireLabelSize(lines);
     const lg = s('g', { class: 'wire-label' + (opts.state ? ` wl-${opts.state}` : ''), 'data-kind': 'wire-label', 'data-id': wire.id });
     lg.appendChild(s('rect', { x: at.x - w / 2, y: at.y - h / 2, width: w, height: h, rx: 0.6, class: 'wl-bg' }));
     lg.appendChild(s('rect', { x: at.x - w / 2, y: at.y - h / 2, width: 1.0, height: h, class: 'wl-swatch', fill: color.hex }));

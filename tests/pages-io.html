@@ -1,0 +1,141 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>test: pages-io</title><link rel="stylesheet" href="../css/app.css"></head><body>
+<header id="toolbar" class="toolbar"></header><aside id="parts" class="panel panel-left"></aside>
+<main class="canvas-wrap"><div id="canvas" class="canvas"></div></main><aside id="props" class="panel panel-right"></aside><footer id="pagebar" class="pagebar"></footer>
+<pre id="out" style="position:fixed;left:0;bottom:40px;background:#fff;z-index:9;font-size:11px;margin:0"></pre>
+<script type="module">
+// テストは localStorage（自動保存）を消すので、公開サイトでは実行しない
+if (!['localhost', '127.0.0.1'].includes(location.hostname)) { document.body.textContent = 'テストはローカル環境（localhost）でのみ実行できます。'; throw new Error('local only'); }
+if (!new URLSearchParams(location.search).get('restore')) localStorage.clear();
+const log=[]; const ok=(n,c)=>log.push((c?'PASS ':'FAIL ')+n);
+window.addEventListener('error',e=>log.push('ERROR '+e.message));
+const q=new URLSearchParams(location.search);
+const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+try{
+if(!q.get('restore')) localStorage.clear();
+await import('../js/main.js');
+const {canvas, store, cmd} = window.__app;
+window.confirm=()=>true; window.alert=(m)=>log.push('ALERT '+m);
+const click=(el)=>{const r=el.getBoundingClientRect(); const o={bubbles:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2,button:0,pointerId:1};
+  el.dispatchEvent(new PointerEvent('pointerdown',o)); el.dispatchEvent(new PointerEvent('pointerup',o)); el.dispatchEvent(new MouseEvent('click',o));};
+if(q.get('restore')){
+  await sleep(50);
+  const p=store.project;
+  ok('restored from autosave', p.name==='P4テスト' && p.pages.length===3);
+  ok('restored content', p.pages.some(pg=>pg.wires.length===2 && pg.tubes.length===1 && pg.texts.length>=1));
+}else{
+canvas.fit();
+cmd.renameProject('P4テスト');
+canvas.placePart('HRS-ZE064W-14DS', 90, 80);
+canvas.placePart('HRS-HVH-280-2/2S', 210, 80);
+const [J1,J2]=store.page.connectors;
+cmd.addWire({connectorId:J1.id,pinId:'1'},{connectorId:J2.id,pinId:'1'},{name:'HV+',color:'O',gauge:3,length:900});
+cmd.addWire({connectorId:J1.id,pinId:'2'},{connectorId:J2.id,pinId:'2'},{name:'HV-',color:'O',gauge:3,length:900});
+const [w1,w2]=store.page.wires;
+cmd.addTube(w1.id,0.3,0.7,{color:'orange',size:13.2,length:500}); cmd.setTubeWire(store.page.tubes[0].id,w2.id,true);
+// text via parts panel button
+const tbtn=[...document.querySelectorAll('#parts .side-btn')].find(b=>b.textContent.includes('テキスト'));
+tbtn.click();
+ok('text added & selected', store.page.texts.length===1 && store.ui.selection?.kind==='text');
+const T=store.page.texts[0];
+cmd.updateText(T.id,{text:'高電圧ハーネス\n※ オレンジ配線は HV', x:30, y:30, size:4, bold:true});
+ok('text rendered multiline', document.querySelectorAll('#canvas .note tspan').length===2);
+// drag text
+const nt=document.querySelector('#canvas .note'); const r=nt.getBoundingClientRect();
+const o=(x,y)=>({bubbles:true,clientX:x,clientY:y,button:0,pointerId:1});
+nt.querySelector('rect').dispatchEvent(new PointerEvent('pointerdown',o(r.x+5,r.y+5)));
+canvas.svg.dispatchEvent(new PointerEvent('pointermove',o(r.x+5+canvas.zoom*10,r.y+5)));
+canvas.svg.dispatchEvent(new PointerEvent('pointerup',o(0,0)));
+ok('text drag', Math.abs(store.page.texts[0].x-40)<0.6);
+// note
+const nbtn=[...document.querySelectorAll('#parts .side-btn')].find(b=>b.textContent.includes('注記'));
+nbtn.click(); ok('note framed', store.page.texts[1].frame===true && !!document.querySelector('#canvas .note-frame'));
+cmd.updateText(store.page.texts[1].id,{x:30,y:160,text:'注記\n1. 配線長さは端子先端まで\n2. チューブ端はテープ巻き'});
+// copy paste text
+store.select({kind:'text',id:T.id}); cmd.copy(); cmd.paste(); ok('text paste', store.page.texts.length===3); cmd.undo();
+// panel textarea live edit
+store.select({kind:'text',id:T.id});
+const ta=document.querySelector('#props textarea'); ta.focus(); ta.value='HV ハーネス'; ta.dispatchEvent(new Event('input',{bubbles:true}));
+ok('live text edit keeps focus', document.activeElement===ta && store.page.texts[0].text==='HV ハーネス');
+ta.blur(); ok('live edit one history', (cmd.undo(), store.page.texts[0].text.startsWith('高電圧')));
+cmd.redo();
+// title block
+cmd.updateTitleBlock({title:'HV 系統図', drawingNo:'SIFT-HN-001', author:'設計担当', date:'2026/11/09', revision:'A'});
+ok('title block rendered', document.querySelector('#canvas .title-block').textContent.includes('SIFT-HN-001') && document.querySelector('#canvas .title-block').textContent.includes('1 / 1'));
+click(document.querySelector('#canvas .title-block .tb-bg'));
+ok('title block select panel', store.ui.selection?.kind==='titleBlock' && document.querySelector('#props h3').textContent==='表題欄');
+store.select(null);
+// pages
+const p1=store.page.id;
+[...document.querySelectorAll('#pagebar button')].find(b=>b.textContent.includes('ページ追加')).click();
+ok('page added & active', store.project.pages.length===2 && store.page.id!==p1 && store.page.name==='ページ 2');
+ok('title shows 2/2', document.querySelector('#canvas .title-block').textContent.includes('2 / 2'));
+cmd.setPaper('A4-portrait'); ok('paper portrait', store.page.paper==='A4-portrait');
+canvas.placePart('HRS-BH12WP-3SC', 100, 100);
+cmd.switchPage(p1); ok('switch page', store.page.id===p1 && store.page.connectors.length===2);
+ok('switch not in history', (cmd.undo(), store.page.id) ); cmd.redo();
+cmd.switchPage(p1);
+// duplicate
+[...document.querySelectorAll('#pagebar button')].find(b=>b.textContent==='複製').click();
+const dup=store.page;
+ok('duplicate', store.project.pages.length===3 && dup.name.includes('コピー') && dup.connectors.length===2 && dup.wires.length===2 && dup.tubes.length===1);
+const ids=new Set(dup.connectors.map(c=>c.id)), wids=new Set(dup.wires.map(w=>w.id));
+ok('duplicate ids remapped', !dup.connectors.some(c=>c.id===J1.id) && dup.wires.every(w=>ids.has(w.from.connectorId)&&ids.has(w.to.connectorId)) && dup.tubes[0].wireIds.every(id=>wids.has(id)));
+// edit in dup independent
+cmd.updateWire(dup.wires[0].id,{color:'R'});
+ok('pages independent', store.project.pages[0].wires[0].color==='O');
+// rename (dblclick tab)
+const at=document.querySelector('#pagebar .page-tab.active'); at.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
+await sleep(10);
+const inp=document.querySelector('#pagebar .page-tab-input'); ok('rename input', !!inp);
+inp.value='LV 系統'; inp.blur(); ok('renamed', store.page.name==='LV 系統');
+// reorder
+const ord=()=>store.project.pages.map(p=>p.name).join(',');
+const before=ord();
+[...document.querySelectorAll('#pagebar button')].find(b=>b.textContent==='◀').click();
+ok('move left', ord()!==before && store.project.pages[0].name==='LV 系統');
+cmd.undo(); ok('move undo', ord()===before);
+// delete page + undo
+const n=store.project.pages.length; cmd.deletePage(); ok('delete page', store.project.pages.length===n-1); cmd.undo(); ok('delete undo', store.project.pages.length===n);
+// keyboard page switch
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'PageDown'})); ok('PageDown', store.project.pages.indexOf(store.page)===2);
+// JSON roundtrip
+const {serialize,deserialize}=await import('../js/core/io.js');
+const {renderSheet}=await import('../js/render/sheetRenderer.js');
+const snapshot=(p)=>p.pages.map((pg,i)=>renderSheet(pg,{forPrint:true,display:p.settings.display,info:{projectName:p.name,pageNo:i+1,pageCount:p.pages.length}}).outerHTML).join('|');
+const json=serialize(store.project); const back=deserialize(json);
+ok('json roundtrip equal', JSON.stringify(back)===JSON.stringify(store.project));
+ok('json render identical', snapshot(back)===snapshot(store.project));
+// load via cmd.openFile(File)
+const before2=snapshot(store.project);
+await cmd.openFile(new File([json],'x.harness.json',{type:'application/json'}));
+ok('openFile restores', snapshot(store.project)===before2 && !store.canUndo());
+// bad file
+await cmd.openFile(new File(['{"a":1}'],'bad.json')); ok('bad file rejected', log.some(l=>l.startsWith('ALERT')) && store.project.name==='P4テスト');
+// print DOM
+const {printProject}=await import('../js/editor/print.js');
+let job=printProject(store.project);
+const pp=document.querySelectorAll('#print-root .print-page');
+ok('print pages', pp.length===3 && pp[1].style.page.startsWith('paper-'));
+ok('print portrait size', [...pp].some(d=>d.style.width==='210mm' && d.style.height==='297mm'));
+ok('no shrink normally', job.shrunk.length===0); job.cleanup();
+// overflow
+cmd.switchPage(store.project.pages[0].id);
+canvas.placePart('HRS-ZE064W-24DS', 330, 80);
+await sleep(30);
+ok('overflow warning on canvas', !document.querySelector('.canvas-warn').hidden);
+job=printProject(store.project); ok('overflow page shrunk', job.shrunk.length===1);
+const ct=document.querySelector('#print-root .content').getAttribute('transform'); ok('content transformed '+ct, /scale/.test(ct||'')); job.cleanup();
+cmd.undo(); await sleep(30); ok('warning cleared', document.querySelector('.canvas-warn').hidden);
+// pdf dialog
+cmd.exportPdf(); ok('pdf dialog', !!document.querySelector('.modal') && document.querySelectorAll('.modal tbody tr').length===3);
+document.querySelector('.modal .tb-btn.light').click(); ok('dialog closed & cleaned', !document.querySelector('.modal') && !document.getElementById('print-root'));
+// autosave
+await sleep(900);
+const saved=localStorage.getItem('sift-harness:autosave');
+ok('autosaved', saved && JSON.parse(saved).pages.length===3);
+ok('save state shown', document.querySelector('.save-state').textContent.includes('自動保存'));
+}
+}catch(e){log.push('EXC '+e.stack)}
+document.getElementById('out').textContent=log.join('\n');
+if(q.get('shot')) document.getElementById('out').remove();
+</script></body></html>

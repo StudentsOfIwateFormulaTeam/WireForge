@@ -11,13 +11,20 @@ export function serialize(project) {
 
 /** JSON 文字列 → 現行スキーマのプロジェクト（不正なら例外） */
 export function deserialize(text) {
+  return deserializeWithReport(text).project;
+}
+
+/** JSON 文字列 → { project, repairs: 修復した内容の説明 } */
+export function deserializeWithReport(text) {
   let data;
   try {
     data = JSON.parse(text);
   } catch {
     throw new Error('JSON として読み込めませんでした（ファイルが壊れている可能性があります）');
   }
-  return migrate(data);
+  const repairs = [];
+  const project = migrate(data, repairs);
+  return { project, repairs };
 }
 
 const safeName = (name) => (name || 'project').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'project';
@@ -35,12 +42,12 @@ export function downloadProject(project) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** File → プロジェクト */
+/** File → { project, repairs } */
 export async function readProjectFile(file) {
-  return deserialize(await file.text());
+  return deserializeWithReport(await file.text());
 }
 
-/** ファイル選択ダイアログを開いて読み込む。キャンセル時は null */
+/** ファイル選択ダイアログを開いて読み込む → { project, repairs }。キャンセル時は null */
 export function pickProjectFile() {
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');

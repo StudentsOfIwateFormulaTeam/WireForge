@@ -19,11 +19,20 @@ export function createToolbar(root, store, cmd, canvas) {
   const zoomLabel = el('span', { class: 'zoom-label', title: '表示倍率（100% = 実寸 1mm ≒ 3.78px）' }, '100%');
   const wireBtn = btn('〰 配線', '配線モード：ピン → ピンをクリックして接続 (W)', () => cmd.toggleWireTool(), { cls: 'toggle' });
   const tubeBtn = btn('◍ チューブ', 'チューブモード：配線の上をドラッグして範囲を指定 (T)', () => cmd.toggleTubeTool(), { cls: 'toggle' });
+  const checkBadge = el('span', { class: 'check-badge', hidden: true }, '');
+  const checkBtn = el('button', { class: 'tb-btn', title: '図面チェック：接続先の欠落・ピンの重複・未入力・はみ出しなどを一覧表示', onclick: () => cmd.toggleCheck?.() }, ['✓ 図面チェック', checkBadge]);
+  cmd.onCheckCounts?.((c) => {
+    const n = c.error + c.warn;
+    checkBadge.hidden = !n;
+    checkBadge.textContent = String(n);
+    checkBadge.classList.toggle('error', c.error > 0);
+    checkBtn.title = `図面チェック：エラー ${c.error} / 警告 ${c.warn} / 未入力 ${c.info}`;
+  });
   const gridBtn = btn('グリッド', 'グリッド表示 ON/OFF (G)', cmd.toggleGrid, { cls: 'toggle' });
   const snapBtn = btn('スナップ', '移動時に 1mm 単位へ吸着', cmd.toggleSnap, { cls: 'toggle' });
 
   root.replaceChildren(
-    el('div', { class: 'tb-group brand' }, [el('span', { class: 'logo' }, '⚡'), el('span', { class: 'app-title' }, 'ハーネス配線図')]),
+    el('div', { class: 'tb-group brand' }, [el('span', { class: 'logo' }, '⚡'), el('span', { class: 'app-title', title: 'ハーネス配線図エディタ' }, 'WireForge')]),
     el('div', { class: 'tb-group' }, [nameInput]),
     el('div', { class: 'tb-group' }, [
       btn('新規', '新しいプロジェクト', cmd.newProject),
@@ -32,7 +41,7 @@ export function createToolbar(root, store, cmd, canvas) {
       btn('PDF出力', '全ページを PDF に出力 (Ctrl+P)', () => cmd.exportPdf()),
       saveState,
     ]),
-    el('div', { class: 'tb-group' }, [undoBtn, redoBtn]),
+    el('div', { class: 'tb-group' }, [undoBtn, redoBtn, checkBtn]),
     el('div', { class: 'tb-group' }, [
       wireBtn,
       tubeBtn,
@@ -48,6 +57,7 @@ export function createToolbar(root, store, cmd, canvas) {
       gridBtn,
       snapBtn,
     ]),
+    el('div', { class: 'tb-group' }, [btn('?', '操作方法・ショートカット一覧 (?)', () => cmd.showHelp?.())]),
   );
 
   const MM_PER_PX = 25.4 / 96;

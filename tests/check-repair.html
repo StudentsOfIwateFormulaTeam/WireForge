@@ -1,0 +1,151 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>test: check-repair</title><link rel="stylesheet" href="../css/app.css"></head><body>
+<header id="toolbar" class="toolbar"></header><aside id="parts" class="panel panel-left"></aside>
+<main class="canvas-wrap"><div id="canvas" class="canvas"></div></main><aside id="props" class="panel panel-right"></aside><footer id="pagebar" class="pagebar"></footer>
+<pre id="out" style="position:fixed;left:0;bottom:40px;background:#fff;z-index:9;font-size:11px;margin:0"></pre>
+<script type="module">
+// テストは localStorage（自動保存）を消すので、公開サイトでは実行しない
+if (!['localhost', '127.0.0.1'].includes(location.hostname)) { document.body.textContent = 'テストはローカル環境（localhost）でのみ実行できます。'; throw new Error('local only'); }
+if (!new URLSearchParams(location.search).get('restore')) localStorage.clear();
+const log=[]; const ok=(n,c,extra='')=>log.push((c?'PASS ':'FAIL ')+n+(c?'':' '+extra));
+window.addEventListener('error',e=>log.push('ERROR '+e.message));
+const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+try{
+localStorage.clear();
+await import('../js/main.js');
+const {canvas, store, cmd} = window.__app;
+window.confirm=()=>true; const alerts=[]; window.alert=(m)=>alerts.push(m);
+const {checkProject} = await import('../js/core/check.js');
+const {deserializeWithReport, serialize} = await import('../js/core/io.js');
+canvas.fit();
+const has=(issues,lv,re)=>issues.some(i=>i.level===lv && re.test(i.message));
+
+// 空の図面 → 問題なし
+ok('empty project clean', checkProject(store.project).length===0);
+
+canvas.placePart('HRS-ZE064W-14DS', 90, 80);
+canvas.placePart('HRS-HVH-280-2/2S', 200, 80);
+const [J1,J2]=store.page.connectors;
+cmd.addWire({connectorId:J1.id,pinId:'1'},{connectorId:J2.id,pinId:'1'},{name:'HV+',length:900});
+let is=checkProject(store.project);
+ok('clean wire no warn/error', !is.some(i=>i.level!=='info'), JSON.stringify(is));
+cmd.addWire({connectorId:J1.id,pinId:'2'},{connectorId:J2.id,pinId:'2'});
+is=checkProject(store.project);
+ok('info: missing name', has(is,'info',/配線名が未入力/));
+ok('info: missing length', has(is,'info',/長さが未入力/));
+// 同じピンに 2 本
+cmd.addWire({connectorId:J1.id,pinId:'1'},{connectorId:J1.id,pinId:'3'},{name:'HV+',length:100});
+is=checkProject(store.project);
+ok('warn: pin double', has(is,'warn',/に配線が 2 本/));
+ok('same name in same net is ok', !has(is,'warn',/配線名「HV\+」/));
+cmd.addWire({connectorId:J1.id,pinId:'4'},{connectorId:J1.id,pinId:'5'},{name:'HV+',length:100});
+is=checkProject(store.project);
+ok('warn: same name different nets', has(is,'warn',/配線名「HV\+」/));
+// コネクタ名重複
+cmd.updateConnector(J2.id,{label:'J1'});
+ok('warn: dup connector label', has(checkProject(store.project),'warn',/コネクタ名「J1」/));
+cmd.updateConnector(J2.id,{label:'J2'});
+// はみ出し
+cmd.updateConnector(J2.id,{x:290});
+ok('warn: outside frame', has(checkProject(store.project),'warn',/コネクタ J2 が図枠から/));
+cmd.updateConnector(J2.id,{x:200,y:80});
+const tid=cmd.addText(250,185,{text:'メモ'});
+ok('warn: overlaps title block', has(checkProject(store.project),'warn',/メモ」が表題欄に重なって/), JSON.stringify(checkProject(store.project).map(i=>i.message)));
+cmd.deleteText(tid);
+// チューブ長さ
+cmd.addTube(store.page.wires[0].id,0.3,0.6);
+ok('info: tube length', has(checkProject(store.project),'info',/チューブ T1: 長さが未入力/));
+
+// パネル UI
+const btn=[...document.querySelectorAll('#toolbar .tb-btn')].find(b=>b.textContent.includes('図面チェック'));
+ok('toolbar check button', !!btn);
+await sleep(400);
+const badge=btn.querySelector('.check-badge');
+ok('badge shows count', !badge.hidden && +badge.textContent>0, badge.textContent);
+btn.click();
+const panel=document.querySelector('.check-panel');
+ok('panel opens', panel && !panel.hidden);
+const items=[...panel.querySelectorAll('.check-item')];
+ok('panel lists items', items.length===checkProject(store.project).length, items.length);
+ok('errors sorted first', items[0].classList.contains('warn')||items[0].classList.contains('error'));
+// 2 ページ目へ移動して、1 ページ目の項目をクリック → ページ切替＋選択
+const p1=store.page.id;
+cmd.addPage(); ok('switched to page 2', store.page.id!==p1);
+await sleep(400);
+const target=[...panel.querySelectorAll('.check-item')].find(b=>/に配線が 2 本/.test(b.textContent));
+ok('page tag shown for multipage', !!target?.querySelector('.pg'));
+target.click();
+ok('click issue switches page', store.page.id===p1);
+ok('click issue selects pin', store.ui.selection?.kind==='pin');
+// 図面外の部品を選択 → 画面内へスクロール
+cmd.updateConnector(J2.id,{x:280});
+canvas.zoomAt(4); store.select({kind:'connector',id:J2.id}); canvas.reveal();
+const r=document.querySelector(`[data-kind="connector"][data-id="${J2.id}"]`).getBoundingClientRect();
+const box=canvas.svg.getBoundingClientRect();
+ok('reveal centers element', Math.abs((r.left+r.width/2)-(box.left+box.width/2))<2, `${r.left} ${box.left}`);
+cmd.updateConnector(J2.id,{x:200});
+// 閉じる
+panel.querySelector('.icon-btn').click(); ok('panel closes', panel.hidden);
+
+// PDF ダイアログに警告
+cmd.exportPdf();
+ok('pdf dialog shows check warning', /図面チェックで/.test(document.querySelector('.modal')?.textContent||''));
+document.querySelector('.modal .link-btn').click();
+ok('pdf dialog link opens check', !document.querySelector('.modal') && !panel.hidden);
+
+// ---- 読み込み時の修復 ----
+const json=JSON.parse(serialize(store.project));
+const pg=json.pages[0];
+pg.connectors.push(null, 'x');
+pg.connectors[0].x='120'; pg.connectors[0].rotation=450;
+pg.wires.push({id:'bad'}); // from/to なし
+pg.wires[1].id=pg.wires[0].id; // ID 重複
+pg.wires[0].waypoints=[[1,2],'bad',[3]];
+pg.wires[0].length='abc';
+pg.tubes.push({id:'tz', wireId:'nope', wireIds:['nope'], t0:0.2, t1:0.5});
+pg.tubes[0].t0=0.9; pg.tubes[0].t1=0.1;
+pg.texts=[{text:'a', size:-1}];
+const {project:fixed, repairs}=deserializeWithReport(JSON.stringify(json));
+const f=fixed.pages[0];
+ok('repair: non-object connectors removed', f.connectors.length===2);
+ok('repair: numeric coercion', f.connectors[0].x===120 && f.connectors[0].rotation===90);
+ok('repair: wire without ends removed', !f.wires.some(w=>w.id==='bad'));
+ok('repair: duplicate ids reassigned', new Set(f.wires.map(w=>w.id)).size===f.wires.length);
+ok('repair: waypoints cleaned', JSON.stringify(f.wires[0].waypoints)==='[[1,2]]');
+ok('repair: bad length → null', f.wires[0].length===null);
+ok('repair: orphan tube removed', !f.tubes.some(t=>t.id==='tz') && f.tubes.length===1);
+ok('repair: tube range ordered', f.tubes[0].t0===0.1 && f.tubes[0].t1===0.9);
+ok('repair: text defaults', f.texts[0].size>0 && typeof f.texts[0].x==='number' && f.texts[0].id);
+ok('repairs reported', repairs.length>=4, JSON.stringify(repairs));
+// 正常ファイルは修復なし
+const clean=deserializeWithReport(serialize(store.project));
+ok('clean file has no repairs', clean.repairs.length===0, JSON.stringify(clean.repairs));
+// 修復があれば開いた時に通知
+const file=new File([JSON.stringify(json)],'x.harness.json',{type:'application/json'});
+await cmd.openFile(file);
+ok('open broken file alerts repairs', alerts.some(a=>/修復/.test(a)));
+ok('open broken file loaded', store.project.pages[0].wires.length===f.wires.length);
+// 存在しない部品・ピン → チェックでエラー
+cmd.updateConnector(store.page.connectors[0].id,{partId:'NO-SUCH'});
+is=checkProject(store.project);
+ok('error: unknown part', has(is,'error',/カタログにありません/));
+// 壊れたファイルは例外
+let threw=false; try{deserializeWithReport('{"format":"x"}')}catch{threw=true}
+ok('foreign json rejected', threw);
+
+// ---- ラベル自動配置 ----
+cmd.newProject();
+canvas.placePart('HRS-ZE064W-14DS', 80, 75); canvas.placePart('HRS-HVH-280-2/2S', 215, 75);
+{const [A,B]=store.page.connectors;
+cmd.addWire({connectorId:A.id,pinId:'1'},{connectorId:B.id,pinId:'1'},{name:'HV+',length:900});
+cmd.addWire({connectorId:A.id,pinId:'2'},{connectorId:B.id,pinId:'2'},{name:'HV-',length:900});}
+const W=await import('../js/render/wireRenderer.js');
+const boxes=()=>store.page.wires.map(w=>W.wireLabelBox(store.page,w,store.project.settings.display));
+const inter=(a,b)=>Math.min(a.x+a.w,b.x+b.w)>Math.max(a.x,b.x)&&Math.min(a.y+a.h,b.y+b.h)>Math.max(a.y,b.y);
+ok('check reports label overlap', checkProject(store.project).some(i=>/重なっています/.test(i.message)) === inter(...boxes()));
+cmd.autoLayoutLabels();
+ok('auto layout removes overlap', !inter(...boxes()));
+ok('no overlap info after layout', !checkProject(store.project).some(i=>/ラベル.*重なって/.test(i.message)));
+cmd.undo(); ok('auto layout undoable', store.canRedo());
+}catch(e){log.push('EXC '+e.message+' '+e.stack)}
+document.getElementById('out').textContent=log.join('\n');
+</script></body></html>

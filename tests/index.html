@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>WireForge テスト</title>
+  <style>
+    body { font: 13px/1.5 "Yu Gothic UI", "Meiryo", system-ui, sans-serif; margin: 16px; color: #1d232b; background: #fff; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .summary { font-size: 15px; font-weight: 700; margin: 8px 0 12px; }
+    .ok { color: #15803d; } .ng { color: #b91c1c; }
+    details { border: 1px solid #d5d9e0; border-radius: 6px; margin: 6px 0; padding: 4px 10px; }
+    summary { cursor: pointer; }
+    pre { margin: 4px 0; font-size: 12px; white-space: pre-wrap; }
+    iframe { position: fixed; left: -10000px; top: 0; width: 1600px; height: 900px; border: 0; }
+  </style>
+</head>
+<body>
+  <h1>WireForge 自動テスト</h1>
+  <div>各テストページを順に読み込み、図面の操作・保存・PDF 準備・図面チェックなどを確認します（数十秒かかります）。<br>
+    ※ このページはブラウザの自動保存データを消去します。<b>ローカル環境（localhost）でのみ</b>実行できます。</div>
+  <div class="summary" id="summary">実行中…</div>
+  <div id="results"></div>
+  <script type="module">
+    const TESTS = [
+      ['connector.html', 'コネクタ配置・回転・コピー'],
+      ['wire.html', '配線'],
+      ['tube.html', 'コルゲートチューブ'],
+      ['pages-io.html', 'ページ・テキスト・保存・PDF 準備'],
+      ['pages-io.html?restore=1', '自動保存からの復元'],
+      ['check-repair.html', '図面チェック・読み込み時の修復・ラベル自動配置'],
+    ];
+    const results = document.getElementById('results');
+    const summary = document.getElementById('summary');
+    if (!['localhost', '127.0.0.1'].includes(location.hostname)) {
+      summary.textContent = 'ローカル環境（localhost）で開いてください。';
+      throw new Error('local only');
+    }
+
+    function runOne(url) {
+      return new Promise((resolve) => {
+        const frame = document.createElement('iframe');
+        frame.src = url;
+        document.body.appendChild(frame);
+        const t0 = Date.now();
+        const poll = setInterval(() => {
+          const text = frame.contentDocument?.getElementById('out')?.textContent || '';
+          if (text || Date.now() - t0 > 30000) {
+            clearInterval(poll);
+            // 自動保存（pagehide 時に確定）を残すため、iframe を外す前に少し待つ
+            setTimeout(() => { frame.remove(); resolve(text || 'FAIL タイムアウト（30 秒以内に結果が出ませんでした）'); }, 300);
+          }
+        }, 200);
+      });
+    }
+
+    let pass = 0, fail = 0;
+    for (const [url, name] of TESTS) {
+      const out = await runOne(url);
+      const lines = out.split('\n').filter(Boolean);
+      const p = lines.filter((l) => l.startsWith('PASS')).length;
+      const f = lines.filter((l) => /^(FAIL|ERROR|EXC)/.test(l)).length;
+      pass += p; fail += f;
+      const d = document.createElement('details');
+      if (f) d.open = true;
+      d.innerHTML = `<summary><b class="${f ? 'ng' : 'ok'}">${f ? '✗' : '✓'}</b> ${name}（${url}）— 成功 ${p} / 失敗 ${f}</summary>`;
+      const pre = document.createElement('pre');
+      pre.textContent = lines.join('\n');
+      d.appendChild(pre);
+      results.appendChild(d);
+    }
+    summary.className = 'summary ' + (fail ? 'ng' : 'ok');
+    summary.textContent = fail ? `失敗あり: 成功 ${pass} / 失敗 ${fail}` : `すべて成功: ${pass} 件`;
+    document.title = `${fail ? 'NG' : 'OK'} ${pass}/${pass + fail}`;
+  </script>
+</body>
+</html>

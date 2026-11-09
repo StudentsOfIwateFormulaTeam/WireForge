@@ -150,33 +150,109 @@ export function nextConnectorLabel(project) {
   return `J${n}`;
 }
 
-/** 読み込んだ JSON を現行スキーマへ変換 */
-export function migrate(data) {
-  if (!data || data.format !== FILE_FORMAT) throw new Error('このアプリのプロジェクトファイルではありません');
+const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+const num = (v, d) => (Number.isFinite(+v) && v !== null && v !== '' ? +v : d);
+const optNum = (v) => (v == null || v === '' ? null : Number.isFinite(+v) ? +v : null);
+
+/**
+ * 読み込んだ JSON を現行スキーマへ変換し、壊れた部分を修復する。
+ * @param report 修復内容（文字列）を追加する配列。省略可
+ */
+export function migrate(data, report = []) {
+  if (!isObj(data) || data.format !== FILE_FORMAT) throw new Error('このアプリのプロジェクトファイルではありません');
   if (data.version > SCHEMA_VERSION) throw new Error(`新しいバージョン(v${data.version})のファイルです。アプリを更新してください`);
   // v1 が最初のバージョン。将来: if (data.version === 1) { ...; data.version = 2; }
+  data.version = SCHEMA_VERSION;
   const def = defaultSettings();
-  data.settings = { ...def, ...(data.settings || {}) };
-  data.settings.display = { ...def.display, ...(data.settings.display || {}) };
-  if (!Array.isArray(data.pages) || !data.pages.length) throw new Error('ページ情報がありません');
-  data.name ??= '無題のプロジェクト';
-  for (const pg of data.pages) {
-    pg.id ??= uid('pg');
-    pg.name ??= 'ページ';
-    pg.connectors ??= [];
-    pg.wires ??= [];
-    for (const w of pg.wires) w.waypoints ??= [];
-    pg.tubes ??= [];
-    for (const t of pg.tubes) {
-      t.wireIds ??= t.wireId ? [t.wireId] : [];
-      t.wireId ??= t.wireIds[0];
-      t.labelDx ??= null;
-      t.labelDy ??= null;
+  data.settings = { ...def, ...(isObj(data.settings) ? data.settings : {}) };
+  data.settings.display = { ...def.display, ...(isObj(data.settings.display) ? data.settings.display : {}) };
+  if (!Array.isArray(data.pages) || !data.pages.some(isObj)) throw new Error('ページ情報がありません');
+  data.name = String(data.name ?? '').trim() || '無題のプロジェクト';
+
+  const seen = new Set();
+  /** 重複・欠落した id を振り直す（参照の付け替え用に旧→新の対応を返す） */
+  const fixId = (o, prefix, what) => {
+    if (typeof o.id !== 'string' || !o.id || seen.has(o.id)) {
+      const old = o.id;
+      o.id = uid(prefix);
+      if (old != null) report.push(`${what}の重複した ID を振り直しました`);
     }
-    pg.texts ??= [];
-    for (const t of pg.texts) Object.assign(t, { ...DEFAULT_TEXT, ...t });
-    pg.titleBlock = { ...defaultTitleBlock(), ...(pg.titleBlock || {}) };
+    seen.add(o.id);
+  };
+  const objects = (arr, what, pgName) => {
+    if (!Array.isArray(arr)) return [];
+    const ok = arr.filter(isObj);
+    if (ok.length !== arr.length) report.push(`「${pgName}」: 不正な${what}データ ${arr.length - ok.length} 件を除きました`);
+    return ok;
+  };
+
+  data.pages = data.pages.filter(isObj);
+  for (const pg of data.pages) {
+    fixId(pg, 'pg', 'ページ');
+    pg.name = String(pg.name ?? '').trim() || 'ページ';
     pg.paper = PAPER_SIZES[pg.paper] ? pg.paper : 'A4-landscape';
+
+    pg.connectors = objects(pg.connectors, 'コネクタ', pg.name);
+    for (const c of pg.connectors) {
+      fixId(c, 'cn', 'コネクタ');
+      c.label = String(c.label ?? '');
+      c.x = num(c.x, 50); c.y = num(c.y, 50);
+      c.rotation = ((num(c.rotation, 0) % 360) + 360) % 360;
+      c.scale = num(c.scale, 1) > 0 ? num(c.scale, 1) : 1;
+      c.mirror = !!c.mirror;
+      c.showFlange = c.showFlange !== false;
+    }
+
+    const before = Array.isArray(pg.wires) ? pg.wires.length : 0;
+    pg.wires = objects(pg.wires, '配線', pg.name).filter((w) => isObj(w.from) && isObj(w.to));
+    const dropped = before - pg.wires.length;
+    if (dropped) report.push(`「${pg.name}」: 接続先の無い配線 ${dropped} 本を除きました`);
+    for (const w of pg.wires) {
+      fixId(w, 'wr', '配線');
+      w.from = { connectorId: String(w.from.connectorId ?? ''), pinId: String(w.from.pinId ?? '') };
+      w.to = { connectorId: String(w.to.connectorId ?? ''), pinId: String(w.to.pinId ?? '') };
+      w.name = String(w.name ?? '');
+      w.type ??= DEFAULT_WIRE.type;
+      w.gauge = num(w.gauge, DEFAULT_WIRE.gauge);
+      w.color ??= DEFAULT_WIRE.color;
+      w.length = optNum(w.length);
+      w.lengthUnit = w.lengthUnit === 'm' ? 'm' : 'mm';
+      w.waypoints = Array.isArray(w.waypoints)
+        ? w.waypoints.filter((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(+p[0]) && Number.isFinite(+p[1])).map((p) => [+p[0], +p[1]])
+        : [];
+      if (w.labelT != null) w.labelT = Math.max(0, Math.min(1, num(w.labelT, 0.5)));
+    }
+
+    const wireIds = new Set(pg.wires.map((w) => w.id));
+    pg.tubes = objects(pg.tubes, 'チューブ', pg.name).filter((t) => {
+      t.wireIds = (Array.isArray(t.wireIds) ? t.wireIds : t.wireId ? [t.wireId] : []).filter((id) => wireIds.has(id));
+      if (!wireIds.has(t.wireId)) t.wireId = t.wireIds[0];
+      if (!t.wireId) { report.push(`「${pg.name}」: 対象の配線が無いチューブ ${t.label ?? ''} を除きました`); return false; }
+      if (!t.wireIds.includes(t.wireId)) t.wireIds.unshift(t.wireId);
+      return true;
+    });
+    for (const t of pg.tubes) {
+      fixId(t, 'tb', 'チューブ');
+      Object.assign(t, { ...DEFAULT_TUBE, ...t });
+      t.label = String(t.label ?? 'T');
+      t.size = num(t.size, DEFAULT_TUBE.size);
+      const a = Math.max(0, Math.min(1, num(t.t0, 0.3))), b = Math.max(0, Math.min(1, num(t.t1, 0.7)));
+      [t.t0, t.t1] = a <= b ? [a, b] : [b, a];
+      t.length = optNum(t.length);
+      t.lengthUnit = t.lengthUnit === 'm' ? 'm' : 'mm';
+      t.labelDx = optNum(t.labelDx);
+      t.labelDy = optNum(t.labelDy);
+    }
+
+    pg.texts = objects(pg.texts, 'テキスト', pg.name);
+    for (const t of pg.texts) {
+      fixId(t, 'tx', 'テキスト');
+      Object.assign(t, { ...DEFAULT_TEXT, ...t });
+      t.text = String(t.text ?? '');
+      t.x = num(t.x, 20); t.y = num(t.y, 20);
+      t.size = num(t.size, DEFAULT_TEXT.size) > 0 ? num(t.size, DEFAULT_TEXT.size) : DEFAULT_TEXT.size;
+    }
+    pg.titleBlock = { ...defaultTitleBlock(), ...(isObj(pg.titleBlock) ? pg.titleBlock : {}) };
   }
   if (!data.pages.some((p) => p.id === data.activePageId)) data.activePageId = data.pages[0].id;
   return data;

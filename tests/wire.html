@@ -1,0 +1,79 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>test: wire</title><link rel="stylesheet" href="../css/app.css"></head><body>
+<header id="toolbar" class="toolbar"></header><aside id="parts" class="panel panel-left"></aside>
+<main class="canvas-wrap"><div id="canvas" class="canvas"></div></main><aside id="props" class="panel panel-right"></aside><footer id="pagebar" class="pagebar"></footer>
+<pre id="out" style="position:fixed;left:0;bottom:40px;background:#fff;z-index:9;font-size:11px;margin:0"></pre>
+<script type="module">
+// テストは localStorage（自動保存）を消すので、公開サイトでは実行しない
+if (!['localhost', '127.0.0.1'].includes(location.hostname)) { document.body.textContent = 'テストはローカル環境（localhost）でのみ実行できます。'; throw new Error('local only'); }
+if (!new URLSearchParams(location.search).get('restore')) localStorage.clear();
+const log=[]; const ok=(n,c)=>log.push((c?'PASS ':'FAIL ')+n);
+window.addEventListener('error',e=>log.push('ERROR '+e.message));
+const q=new URLSearchParams(location.search);
+try{
+await import('../js/main.js');
+const {canvas, store, cmd} = window.__app;
+window.confirm=()=>true;
+canvas.fit();
+canvas.placePart('HRS-ZE064W-8DS', 80, 75);
+canvas.placePart('HRS-ZE064W-14DS', 220, 75);
+canvas.placePart('HRS-BH12WP-3SC', 80, 155);
+canvas.placePart('HRS-HVH-280-2/2S', 220, 155);
+const [J1,J2,J3,J4]=store.page.connectors;
+const pinEl=(cid,pid)=>document.querySelector(`#canvas [data-kind=pin][data-id="${cid}"][data-pin="${pid}"]`);
+const click=(el)=>{const r=el.getBoundingClientRect(); const o={bubbles:true,clientX:r.x+r.width/2,clientY:r.y+r.height/2,button:0,pointerId:1};
+  el.dispatchEvent(new PointerEvent('pointerdown',o)); el.dispatchEvent(new PointerEvent('pointerup',o));};
+// wire mode via key W
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'w'}));
+ok('wire tool on', store.ui.tool==='wire');
+click(pinEl(J1.id,'3')); ok('start set', store.ui.wireStart?.pinId==='3');
+click(pinEl(J2.id,'1')); ok('wire1 created', store.page.wires.length===1);
+const w1=store.page.wires[0];
+ok('wire ends', w1.from.connectorId===J1.id && w1.from.pinId==='3' && w1.to.connectorId===J2.id && w1.to.pinId==='1');
+cmd.updateWire(w1.id,{name:'CAN_H', color:'Y', gauge:0.85, length:1200});
+click(pinEl(J1.id,'4')); click(pinEl(J2.id,'2'));
+const w2=store.page.wires[1];
+ok('wire2 inherits spec', w2 && w2.color==='Y' && w2.gauge===0.85 && w2.length==null);
+cmd.updateWire(w2.id,{name:'CAN_L', color:'G', length:1.2*1000, lengthUnit:'m'});
+// branch: J2-1 also to J4-1 (shared pin -> net)
+click(pinEl(J2.id,'1')); click(pinEl(J4.id,'1'));
+const w3=store.page.wires[2];
+cmd.updateWire(w3.id,{name:'+12V', color:'R', gauge:2, type:'UL1015', length:450});
+click(pinEl(J3.id,'A')); click(pinEl(J4.id,'2'));
+const w4=store.page.wires[3]; cmd.updateWire(w4.id,{name:'GND', color:'B', gauge:3, length:800});
+click(pinEl(J3.id,'1')); click(pinEl(J1.id,'8'));
+const w5=store.page.wires[4]; cmd.updateWire(w5.id,{name:'SIG', color:'W', gauge:0.3, length:600});
+ok('5 wires', store.page.wires.length===5);
+window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));
+ok('tool off', store.ui.tool==='select');
+// pin colors
+ok('pin colored', getComputedStyle(pinEl(J1.id,'3')).fill==='rgb(242, 197, 0)');
+// select wire by clicking line
+const hit=document.querySelector(`#canvas .wire[data-id="${w1.id}"] .wire-hit`);
+store.select({kind:'wire',id:w1.id});
+ok('net highlight', document.querySelector(`#canvas .wire[data-id="${w3.id}"]`).classList.contains('wire-net'));
+ok('panel color chips', document.querySelectorAll('#props .color-chip').length===10);
+ok('panel net list', document.querySelectorAll('#props .wire-table tbody tr').length===1);
+// add waypoint via handle drag
+const h=document.querySelector('#canvas .handle-add'); const r=h.getBoundingClientRect();
+const o=(x,y)=>({bubbles:true,clientX:x,clientY:y,button:0,pointerId:1});
+h.dispatchEvent(new PointerEvent('pointerdown',o(r.x+r.width/2,r.y+r.height/2)));
+canvas.svg.dispatchEvent(new PointerEvent('pointermove',o(r.x+r.width/2,r.y+r.height/2-30*canvas.zoom/3)));
+canvas.svg.dispatchEvent(new PointerEvent('pointerup',o(0,0)));
+ok('waypoint added', store.page.wires[0].waypoints.length===1);
+cmd.undo(); ok('waypoint undo', store.page.wires[0].waypoints.length===0); cmd.redo();
+// change endpoint via panel equivalent
+cmd.updateWire(w2.id,{to:{connectorId:J2.id,pinId:'5'}}); ok('endpoint change', store.page.wires[1].to.pinId==='5');
+// labelT spread
+cmd.updateWire(w1.id,{labelT:0.3}); cmd.updateWire(w2.id,{labelT:0.62});
+// delete connector cascade
+store.select({kind:'connector',id:J4.id}); cmd.deleteSelection();
+ok('cascade delete', store.page.wires.length===3 && store.page.connectors.length===3);
+cmd.undo(); ok('cascade undo', store.page.wires.length===5);
+// delete wire by key
+store.select({kind:'wire',id:w5.id}); window.dispatchEvent(new KeyboardEvent('keydown',{key:'Delete'}));
+ok('wire delete', store.page.wires.length===4); cmd.undo();
+store.select(q.get('sel')==='wire'?{kind:'wire',id:w1.id}:null);
+}catch(e){log.push('EXC '+e.stack)}
+document.getElementById('out').textContent=log.join('\n');
+if(q.get('shot')) document.getElementById('out').remove();
+</script></body></html>

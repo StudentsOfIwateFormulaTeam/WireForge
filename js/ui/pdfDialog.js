@@ -3,7 +3,7 @@ import { el } from './dom.js';
 import { printProject } from '../editor/print.js';
 import { PAPER_SIZES } from '../core/model.js';
 
-export function openPdfDialog(store) {
+export function openPdfDialog(store, { checkCounts, openCheck } = {}) {
   const project = store.project;
   let scope = 'all';
   let job = null;
@@ -22,7 +22,12 @@ export function openPdfDialog(store) {
 
   function render() {
     const pages = project.pages.filter((p) => scope === 'all' || p.id === project.activePageId);
+    const c = checkCounts;
     body.replaceChildren(
+      c && (c.error || c.warn) ? el('div', { class: 'warn-box' }, [
+        `図面チェックで エラー ${c.error} 件・警告 ${c.warn} 件 が見つかっています。`,
+        openCheck ? el('button', { class: 'link-btn', onclick: () => { close(); openCheck(); } }, '内容を確認する') : null,
+      ]) : null,
       el('div', { class: 'modal-row' }, [
         el('label', { class: 'check' }, [el('input', { type: 'radio', name: 'pdf-scope', checked: scope === 'all', onchange: () => { scope = 'all'; prepare(); } }), `全ページ（${project.pages.length} ページ）を 1 つの PDF に`]),
         el('label', { class: 'check' }, [el('input', { type: 'radio', name: 'pdf-scope', checked: scope === 'current', onchange: () => { scope = 'current'; prepare(); } }), '現在のページのみ']),

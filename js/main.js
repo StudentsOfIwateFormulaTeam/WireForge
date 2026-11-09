@@ -8,18 +8,24 @@ import { createPartsPanel } from './ui/partsPanel.js';
 import { createPropertyPanel } from './ui/propertyPanel.js';
 import { createPageBar } from './ui/pageBar.js';
 import { openPdfDialog } from './ui/pdfDialog.js';
+import { createCheckPanel } from './ui/checkPanel.js';
+import { openHelpDialog } from './ui/helpDialog.js';
 import { loadAutosave, startAutosave } from './core/io.js';
 
 // 前回の作業（ブラウザ内の自動保存）があれば復元
 const restored = new URLSearchParams(location.search).has('fresh') ? null : loadAutosave();
 const store = createStore(restored || createProject());
 const cmd = createCommands(store);
-cmd.exportPdf = () => openPdfDialog(store);
 
 const pageBar = createPageBar(document.getElementById('pagebar'), store, cmd);
 const canvas = createCanvas(document.getElementById('canvas'), store, cmd, {
   onCursor: (x, y) => pageBar.setCursor(x, y),
 });
+const check = createCheckPanel(document.querySelector('.canvas-wrap'), store, cmd, canvas);
+cmd.toggleCheck = () => check.toggle();
+cmd.showHelp = openHelpDialog;
+cmd.onCheckCounts = (fn) => check.onCounts(fn);
+cmd.exportPdf = () => openPdfDialog(store, { checkCounts: check.counts(), openCheck: () => check.toggle(true) });
 const props = createPropertyPanel(document.getElementById('props'), store, cmd);
 createPartsPanel(document.getElementById('parts'), store, canvas, cmd, { onShowInfo: props.showPartInfo });
 const toolbar = createToolbar(document.getElementById('toolbar'), store, cmd, canvas);

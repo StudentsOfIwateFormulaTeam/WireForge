@@ -127,6 +127,11 @@ export function createPropertyPanel(root, store, cmd) {
         info('配線数', String(pg.wires.length)),
         info('チューブ数', String(pg.tubes.length)),
         info('テキスト数', String(pg.texts.length)),
+        el('button', {
+          class: 'secondary-btn', disabled: !pg.wires.length,
+          title: '配線ラベル・チューブラベルを、コネクタや他のラベルと重ならない位置へ並べ直します（元に戻す で戻せます）',
+          onclick: () => cmd.autoLayoutLabels(),
+        }, 'ラベルを自動配置'),
       ]),
       displayToggles(),
       el('div', { class: 'prop-group' }, [el('h4', {}, `配線一覧（${pg.wires.length}）`), wireList(pg.wires)]),
@@ -138,7 +143,7 @@ export function createPropertyPanel(root, store, cmd) {
           ['W', '配線モード（ピン→ピンをクリック）'], ['T', 'チューブモード（配線上をドラッグ）'], ['R / Shift+R', '回転'], ['Delete', '削除'],
           ['Ctrl+C / V / D', 'コピー/貼付/複製'], ['Ctrl+Z / Y', '元に戻す/やり直す'],
           ['Ctrl+S / O', '保存 / 開く'], ['Ctrl+P', 'PDF 出力'], ['PageUp / Down', 'ページ切替'],
-          ['矢印キー', '1mm 移動（Shift で 10mm）'], ['G / F', 'グリッド / 全体表示'],
+          ['矢印キー', '1mm 移動（Shift で 10mm）'], ['G / F', 'グリッド / 全体表示'], ['?', '操作方法の一覧'],
         ].map(([k, v]) => el('li', {}, [el('kbd', {}, k), ' ', v]))),
       ]),
     ];
