@@ -2,3 +2,6 @@ Datasheet/
 *.pdf
 .DS_Store
 Thumbs.db
+
+# 計画書（非公開資料）
+計画書.txt
